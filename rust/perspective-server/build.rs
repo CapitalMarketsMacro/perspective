@@ -32,6 +32,28 @@ fn main() -> Result<(), std::io::Error> {
     Ok(())
 }
 
+/// Returns the vcpkg root path from the VCPKG_ROOT environment variable.
+fn vcpkg_root() -> Option<PathBuf> {
+    std::env::var("VCPKG_ROOT").ok().map(PathBuf::from)
+}
+
+/// Returns the appropriate vcpkg triplet for the current target platform.
+fn vcpkg_triplet() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "x64-windows-static-perspective"
+    } else if cfg!(target_os = "linux") {
+        "x64-linux-static"
+    } else if cfg!(target_os = "macos") {
+        if cfg!(target_arch = "aarch64") {
+            "arm64-osx"
+        } else {
+            "x64-osx"
+        }
+    } else {
+        panic!("Unsupported target OS for vcpkg triplet selection");
+    }
+}
+
 fn cmake_build() -> Result<Option<PathBuf>, std::io::Error> {
     let mut dst = Config::new("cpp/perspective");
     if let Some(cpp_build_dir) = std::option_env!("PSP_CPP_BUILD_DIR") {
@@ -62,6 +84,45 @@ fn cmake_build() -> Result<Option<PathBuf>, std::io::Error> {
         std::env::var("DEP_PERSPECTIVE_CLIENT_PROTO_PATH").unwrap(),
     );
 
+    let is_wasm = std::env::var("TARGET")
+        .unwrap_or_default()
+        .contains("wasm32");
+
+    // vcpkg integration for native (non-WASM) builds
+    if !is_wasm {
+        if let Some(root) = vcpkg_root() {
+            let toolchain_file = root.join("scripts").join("buildsystems").join("vcpkg.cmake");
+            if toolchain_file.exists() {
+                let triplet = vcpkg_triplet();
+                let manifest_dir = std::fs::canonicalize(".")
+                    .expect("Failed to canonicalize current directory");
+                let overlay_triplets = std::fs::canonicalize("cmake/triplets")
+                    .expect("Failed to canonicalize triplets directory");
+
+                println!("cargo:warning=Using vcpkg at {} with triplet {}", root.display(), triplet);
+
+                // For macOS cross-compilation, the existing Darwin toolchain file
+                // is set as CMAKE_TOOLCHAIN_FILE. In that case, chainload vcpkg.
+                if cfg!(target_os = "macos") && std::env::var("PSP_ARCH").is_ok() {
+                    dst.define("VCPKG_CHAINLOAD_TOOLCHAIN_FILE", &toolchain_file);
+                } else {
+                    dst.define("CMAKE_TOOLCHAIN_FILE", &toolchain_file);
+                }
+
+                dst.define("VCPKG_TARGET_TRIPLET", triplet);
+                dst.define("VCPKG_MANIFEST_DIR", &manifest_dir);
+                dst.define("VCPKG_OVERLAY_TRIPLETS", &overlay_triplets);
+            } else {
+                println!(
+                    "cargo:warning=VCPKG_ROOT is set but vcpkg.cmake not found at {}",
+                    toolchain_file.display()
+                );
+            }
+        } else {
+            println!("cargo:warning=VCPKG_ROOT not set; falling back to ExternalProject dependency resolution");
+        }
+    }
+
     if cfg!(target_os = "macos") {
         // Set CMAKE_OSX_ARCHITECTURES et al. for Mac builds.  Arrow does not forward on
         // CMAKE_OSX_ARCHITECTURES but it does forward on a CMAKE_TOOLCHAIN_FILE. In
@@ -78,17 +139,20 @@ fn cmake_build() -> Result<Option<PathBuf>, std::io::Error> {
         };
 
         if let Some(path) = toolchain_file {
-            dst.define(
-                "CMAKE_TOOLCHAIN_FILE",
-                std::fs::canonicalize(path).expect("Failed to canonicalize toolchain file."),
-            );
+            // When vcpkg is active, the vcpkg toolchain is already set as
+            // CMAKE_TOOLCHAIN_FILE and the Darwin toolchain is chainloaded
+            // via VCPKG_CHAINLOAD_TOOLCHAIN_FILE (set above). When vcpkg is
+            // not active, set the Darwin toolchain directly.
+            if vcpkg_root().is_none() || is_wasm {
+                dst.define(
+                    "CMAKE_TOOLCHAIN_FILE",
+                    std::fs::canonicalize(path).expect("Failed to canonicalize toolchain file."),
+                );
+            }
         }
     }
 
-    if std::env::var("TARGET")
-        .unwrap_or_default()
-        .contains("wasm32")
-    {
+    if is_wasm {
         dst.define("PSP_WASM_BUILD", "1");
     } else {
         dst.define("PSP_WASM_BUILD", "0");
@@ -125,6 +189,9 @@ fn cmake_build() -> Result<Option<PathBuf>, std::io::Error> {
         }
     }
 
+    // Build only the psp target (not "install" which may not exist)
+    dst.build_target("psp");
+
     println!("cargo:warning=Building cmake {profile}");
     if std::env::var("PSP_BUILD_VERBOSE").unwrap_or_default() != "" {
         // checks non-empty env var
@@ -141,10 +208,38 @@ fn cmake_link_deps(cmake_build_dir: &Path) -> Result<(), std::io::Error> {
         cmake_build_dir.display()
     );
 
-    // println!("cargo:warning=MESSAGE {}/build", cmake_build_dir.display());
     println!("cargo:rustc-link-lib=static=psp");
     link_cmake_static_archives(cmake_build_dir)?;
+
+    // For vcpkg native builds, also scan the vcpkg installed lib directory.
+    // vcpkg manifest mode installs packages into <build_dir>/build/vcpkg_installed/<triplet>/lib/
+    let is_wasm = std::env::var("TARGET")
+        .unwrap_or_default()
+        .contains("wasm32");
+
+    if !is_wasm && vcpkg_root().is_some() {
+        let triplet = vcpkg_triplet();
+        let vcpkg_lib_dir = cmake_build_dir
+            .join("build")
+            .join("vcpkg_installed")
+            .join(triplet)
+            .join("lib");
+
+        if vcpkg_lib_dir.exists() {
+            println!(
+                "cargo:warning=Adding vcpkg lib dir: {}",
+                vcpkg_lib_dir.display()
+            );
+            println!(
+                "cargo:rustc-link-search=native={}",
+                vcpkg_lib_dir.display()
+            );
+            link_cmake_static_archives(&vcpkg_lib_dir)?;
+        }
+    }
+
     println!("cargo:rerun-if-changed=cpp/perspective");
+    println!("cargo:rerun-if-changed=vcpkg.json");
     Ok(())
 }
 

@@ -540,7 +540,7 @@ search::operator()(t_parameter_list parameters) {
         return rval;
     }
 
-    rval.set(m_expression_vocab.intern(result.ToString()));
+    rval.set(m_expression_vocab.intern(std::string(result)));
 
     return rval;
 }

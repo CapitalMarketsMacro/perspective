@@ -28,6 +28,8 @@ include = [
     "cpp/**/*",
     "docs/**/*",
     "cmake/**/*",
+    "vcpkg.json",
+    "vcpkg-configuration.json",
     "Cargo.toml",
 ]
 

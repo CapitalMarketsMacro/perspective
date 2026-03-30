@@ -31,6 +31,14 @@ endif()
 set(CMAKE_MODULE_PATH "${PSP_CMAKE_MODULE_PATH}/modules" ${CMAKE_MODULE_PATH})
 set(MSVC_RUNTIME_LIBRARY MultiThreaded)
 
+# Detect vcpkg toolchain
+if(DEFINED CMAKE_TOOLCHAIN_FILE AND CMAKE_TOOLCHAIN_FILE MATCHES "vcpkg")
+    set(PSP_USE_VCPKG TRUE)
+    message(STATUS "vcpkg toolchain detected: ${CMAKE_TOOLCHAIN_FILE}")
+else()
+    set(PSP_USE_VCPKG FALSE)
+endif()
+
 option(PSP_WASM64 "Enable WASM Memory64 support" OFF)
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
@@ -363,46 +371,74 @@ if(PSP_PYODIDE)
     string(APPEND CMAKE_CXX_FLAGS " -fexceptions")
 endif()
 
-# Build (read: download and extract) header-only dependencies from external sources
-set(all_deps_INCLUDE_DIRS "")
-psp_build_dep("date" "${PSP_CMAKE_MODULE_PATH}/date.txt.in")
-psp_build_dep("hopscotch" "${PSP_CMAKE_MODULE_PATH}/hopscotch.txt.in")
-psp_build_dep("ordered-map" "${PSP_CMAKE_MODULE_PATH}/ordered-map.txt.in")
-psp_build_dep("rapidjson" "${PSP_CMAKE_MODULE_PATH}/rapidjson.txt.in")
-list(APPEND all_deps_INCLUDE_DIRS
-    ${date_INCLUDE_DIRS}
-    ${hopscotch_INCLUDE_DIRS}
-    ${ordered-map_INCLUDE_DIRS}
-    ${rapidjson_INCLUDE_DIRS})
+# ############################
+# DEPENDENCY RESOLUTION      #
+# ############################
+if(PSP_USE_VCPKG AND NOT PSP_WASM_BUILD)
+    # === vcpkg path (native builds) ===
+    psp_build_message("${Cyan}Using vcpkg for dependency resolution${ColorReset}")
 
-psp_build_dep("Boost" "${PSP_CMAKE_MODULE_PATH}/Boost.txt.in")
-list(APPEND all_deps_INCLUDE_DIRS ${Boost_INCLUDE_DIRS})
+    find_package(Arrow CONFIG REQUIRED)
+    find_package(re2 CONFIG REQUIRED)
+    find_package(RapidJSON CONFIG REQUIRED)
+    find_package(Boost CONFIG REQUIRED)
+    find_package(date CONFIG REQUIRED)
+    find_package(tsl-hopscotch-map CONFIG REQUIRED)
+    find_package(tsl-ordered-map CONFIG REQUIRED)
+    # exprtk is header-only with no CMake config in vcpkg;
+    # vcpkg places it in the standard include path automatically.
 
-# Build dependencies as static libraries with add_subdirectory()
-# Note that values set above for CMAKE_C_FLAGS, CMAKE_CXX_FLAGS, etc. will
-# apply to dependency cmake builds
+    # vcpkg targets propagate include dirs via target properties,
+    # so all_deps_INCLUDE_DIRS is not needed for the vcpkg path.
+    set(all_deps_INCLUDE_DIRS "")
 
-# Arrow builds its own dependencies
-psp_build_message("${Cyan}Building Apache Arrow${ColorReset}")
-psp_build_dep("arrow" "${PSP_CMAKE_MODULE_PATH}/arrow.txt.in")
-list(APPEND all_deps_INCLUDE_DIRS
-    ${arrow_INCLUDE_DIRS})
+    # Canonical link target names (vcpkg)
+    set(PSP_ARROW_TARGET Arrow::arrow_static)
+    set(PSP_RE2_TARGET re2::re2)
 
-# Build re2 as our regex library
-# this is a workaround for some re2-specific weirdness
-add_definitions(-DTARGET_OS_OSX=1)
-psp_build_dep("re2" "${PSP_CMAKE_MODULE_PATH}/re2.txt.in")
-list(APPEND all_deps_INCLUDE_DIRS
-    ${re2_INCLUDE_DIRS})
+    # Protobuf setup (vcpkg path)
+    set(protobuf_BUILD_TESTS OFF FORCE)
+    add_subdirectory(${PSP_CMAKE_MODULE_PATH}/../cpp/protos "${CMAKE_BINARY_DIR}/protos-build")
+else()
+    # === ExternalProject path (WASM/Emscripten builds or no vcpkg) ===
+    psp_build_message("${Cyan}Using ExternalProject for dependency resolution${ColorReset}")
 
-# Build exprtk for expression parsing
-psp_build_dep("exprtk" "${PSP_CMAKE_MODULE_PATH}/exprtk.txt.in")
-list(APPEND all_deps_INCLUDE_DIRS
-    ${exprtk_INCLUDE_DIRS})
+    set(all_deps_INCLUDE_DIRS "")
+    psp_build_dep("date" "${PSP_CMAKE_MODULE_PATH}/date.txt.in")
+    psp_build_dep("hopscotch" "${PSP_CMAKE_MODULE_PATH}/hopscotch.txt.in")
+    psp_build_dep("ordered-map" "${PSP_CMAKE_MODULE_PATH}/ordered-map.txt.in")
+    psp_build_dep("rapidjson" "${PSP_CMAKE_MODULE_PATH}/rapidjson.txt.in")
+    list(APPEND all_deps_INCLUDE_DIRS
+        ${date_INCLUDE_DIRS}
+        ${hopscotch_INCLUDE_DIRS}
+        ${ordered-map_INCLUDE_DIRS}
+        ${rapidjson_INCLUDE_DIRS})
 
-# Protobuf setup
-set(protobuf_BUILD_TESTS OFF FORCE)
-add_subdirectory(${PSP_CMAKE_MODULE_PATH}/../cpp/protos "${CMAKE_BINARY_DIR}/protos-build")
+    psp_build_dep("Boost" "${PSP_CMAKE_MODULE_PATH}/Boost.txt.in")
+    list(APPEND all_deps_INCLUDE_DIRS ${Boost_INCLUDE_DIRS})
+
+    psp_build_message("${Cyan}Building Apache Arrow${ColorReset}")
+    psp_build_dep("arrow" "${PSP_CMAKE_MODULE_PATH}/arrow.txt.in")
+    list(APPEND all_deps_INCLUDE_DIRS
+        ${arrow_INCLUDE_DIRS})
+
+    add_definitions(-DTARGET_OS_OSX=1)
+    psp_build_dep("re2" "${PSP_CMAKE_MODULE_PATH}/re2.txt.in")
+    list(APPEND all_deps_INCLUDE_DIRS
+        ${re2_INCLUDE_DIRS})
+
+    psp_build_dep("exprtk" "${PSP_CMAKE_MODULE_PATH}/exprtk.txt.in")
+    list(APPEND all_deps_INCLUDE_DIRS
+        ${exprtk_INCLUDE_DIRS})
+
+    # Canonical link target names (ExternalProject)
+    set(PSP_ARROW_TARGET arrow_static)
+    set(PSP_RE2_TARGET re2)
+
+    # Protobuf setup (ExternalProject path)
+    set(protobuf_BUILD_TESTS OFF FORCE)
+    add_subdirectory(${PSP_CMAKE_MODULE_PATH}/../cpp/protos "${CMAKE_BINARY_DIR}/protos-build")
+endif()
 
 # ####################
 set(CMAKE_C_FLAGS " \
@@ -620,7 +656,7 @@ if(PSP_WASM_BUILD AND NOT PSP_PYTHON_BUILD)
     target_include_directories(psp SYSTEM PRIVATE ${all_deps_INCLUDE_DIRS})
     target_compile_definitions(psp PRIVATE PSP_ENABLE_WASM=1)
     set_target_properties(psp PROPERTIES COMPILE_FLAGS "")
-    target_link_libraries(psp PRIVATE arrow_static re2 protos)
+    target_link_libraries(psp PRIVATE ${PSP_ARROW_TARGET} ${PSP_RE2_TARGET} protos)
 
     add_executable(perspective_esm src/cpp/binding_api.cpp)
     message(STATUS "all_deps_INCLUDE_DIRS ${all_deps_INCLUDE_DIRS}")
@@ -668,7 +704,11 @@ elseif(PSP_CPP_BUILD OR PSP_PYTHON_BUILD)
             # Cpython
             add_library(psp STATIC ${PYTHON_SOURCE_FILES})
             target_include_directories(psp PRIVATE ${psp_INCLUDE_DIRS})
-            target_include_directories(psp SYSTEM PRIVATE ${all_deps_INCLUDE_DIRS})
+            if(PSP_USE_VCPKG)
+                # vcpkg: include dirs come from linked targets
+            else()
+                target_include_directories(psp SYSTEM PRIVATE ${all_deps_INCLUDE_DIRS})
+            endif()
             target_compile_definitions(psp PRIVATE PSP_ENABLE_PYTHON=1 PSP_PARALLEL_FOR=1)
         endif()
 
@@ -682,14 +722,44 @@ elseif(PSP_CPP_BUILD OR PSP_PYTHON_BUILD)
             target_compile_options(psp PRIVATE -fvisibility=hidden)
         endif()
 
-        # Linking against arrow_static also links against its bundled dependencies
-        target_link_libraries(psp PRIVATE arrow_static re2 protos)
+        if(PSP_USE_VCPKG AND NOT PSP_WASM_BUILD)
+            target_link_libraries(psp PRIVATE
+                ${PSP_ARROW_TARGET}
+                ${PSP_RE2_TARGET}
+                protos
+                RapidJSON
+                Boost::headers
+                date::date
+                tsl::hopscotch_map
+                tsl::ordered_map
+            )
+        else()
+            target_link_libraries(psp PRIVATE ${PSP_ARROW_TARGET} ${PSP_RE2_TARGET} protos)
+        endif()
     else()
         add_library(psp STATIC ${WASM_SOURCE_FILES})
         target_include_directories(psp PRIVATE ${psp_INCLUDE_DIRS})
-        target_include_directories(psp SYSTEM PRIVATE ${all_deps_INCLUDE_DIRS})
+        if(PSP_USE_VCPKG)
+            # vcpkg: include dirs come from linked targets
+        else()
+            target_include_directories(psp SYSTEM PRIVATE ${all_deps_INCLUDE_DIRS})
+        endif()
         target_compile_options(psp PRIVATE -fvisibility=hidden)
-        target_link_libraries(psp PRIVATE arrow_static re2 protos)
+
+        if(PSP_USE_VCPKG)
+            target_link_libraries(psp PRIVATE
+                ${PSP_ARROW_TARGET}
+                ${PSP_RE2_TARGET}
+                protos
+                RapidJSON
+                Boost::headers
+                date::date
+                tsl::hopscotch_map
+                tsl::ordered_map
+            )
+        else()
+            target_link_libraries(psp PRIVATE ${PSP_ARROW_TARGET} ${PSP_RE2_TARGET} protos)
+        endif()
     endif()
 
     if(PSP_CPP_BUILD_STRICT AND NOT WIN32)

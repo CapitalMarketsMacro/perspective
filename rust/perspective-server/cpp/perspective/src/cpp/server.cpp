@@ -820,7 +820,7 @@ ProtoServer::handle_request(
 ) {
     const auto start = std::chrono::high_resolution_clock::now();
     proto::Request req_env;
-    req_env.ParseFromString(data);
+    req_env.ParseFromString(std::string(data));
     std::vector<ProtoServerResp<std::string>> serialized_responses;
     std::vector<proto::Response> responses;
 
