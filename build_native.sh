@@ -92,6 +92,7 @@ rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"/{lib,cpp_cache,example/src}
 
 # Copy Rust source crates (needed for path dependency)
+mkdir -p "$DIST_DIR/rust"
 cp -r rust/perspective "$DIST_DIR/rust/perspective"
 cp -r rust/perspective-client "$DIST_DIR/rust/perspective-client"
 cp -r rust/perspective-server "$DIST_DIR/rust/perspective-server"
