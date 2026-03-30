@@ -607,7 +607,7 @@ csvToTable(
 ) {
     const arrow::io::IOContext& io_context = arrow::io::default_io_context();
     auto input = std::make_shared<arrow::io::BufferReader>(
-        arrow::Buffer::FromString(csv));
+        arrow::Buffer::FromString(std::string(csv)));
     auto read_options = arrow::csv::ReadOptions::Defaults();
     auto parse_options = arrow::csv::ParseOptions::Defaults();
     auto convert_options = arrow::csv::ConvertOptions::Defaults();
