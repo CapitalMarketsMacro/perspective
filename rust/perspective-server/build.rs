@@ -204,12 +204,6 @@ fn cmake_build() -> Result<Option<PathBuf>, std::io::Error> {
 
 fn cmake_link_deps(cmake_build_dir: &Path) -> Result<(), std::io::Error> {
     let build_dir = cmake_build_dir.join("build");
-    println!(
-        "cargo:rustc-link-search=native={}",
-        build_dir.display()
-    );
-
-    println!("cargo:rustc-link-lib=static=psp");
 
     let is_wasm = std::env::var("TARGET")
         .unwrap_or_default()
@@ -228,6 +222,9 @@ fn cmake_link_deps(cmake_build_dir: &Path) -> Result<(), std::io::Error> {
             .join(triplet)
             .join("lib");
 
+        // Link psp from its build dir (may be in MinSizeRel/ on Windows)
+        link_archives_flat(&build_dir, &mut linked)?;
+
         // Link protos from its build dir
         let protos_dir = build_dir.join("protos-build");
         link_archives_flat(&protos_dir, &mut linked)?;
@@ -243,6 +240,11 @@ fn cmake_link_deps(cmake_build_dir: &Path) -> Result<(), std::io::Error> {
     } else {
         // ExternalProject path: recursive walk is fine since there's no
         // vcpkg_installed directory with duplicate triplets.
+        println!(
+            "cargo:rustc-link-search=native={}/build",
+            cmake_build_dir.display()
+        );
+        println!("cargo:rustc-link-lib=static=psp");
         link_cmake_static_archives(cmake_build_dir, &mut linked)?;
     }
 
