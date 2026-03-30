@@ -605,7 +605,8 @@ csvToTable(
     std::unordered_map<std::string, std::shared_ptr<arrow::DataType>>& schema
 ) {
     const arrow::io::IOContext& io_context = arrow::io::default_io_context();
-    auto input = std::make_shared<arrow::io::BufferReader>(csv);
+    auto input = std::make_shared<arrow::io::BufferReader>(
+        arrow::Buffer::FromString(csv));
     auto read_options = arrow::csv::ReadOptions::Defaults();
     auto parse_options = arrow::csv::ParseOptions::Defaults();
     auto convert_options = arrow::csv::ConvertOptions::Defaults();
