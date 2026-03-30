@@ -203,39 +203,47 @@ fn cmake_build() -> Result<Option<PathBuf>, std::io::Error> {
 }
 
 fn cmake_link_deps(cmake_build_dir: &Path) -> Result<(), std::io::Error> {
+    let build_dir = cmake_build_dir.join("build");
     println!(
-        "cargo:rustc-link-search=native={}/build",
-        cmake_build_dir.display()
+        "cargo:rustc-link-search=native={}",
+        build_dir.display()
     );
 
     println!("cargo:rustc-link-lib=static=psp");
-    link_cmake_static_archives(cmake_build_dir)?;
 
-    // For vcpkg native builds, also scan the vcpkg installed lib directory.
-    // vcpkg manifest mode installs packages into <build_dir>/build/vcpkg_installed/<triplet>/lib/
     let is_wasm = std::env::var("TARGET")
         .unwrap_or_default()
         .contains("wasm32");
 
+    let mut linked = std::collections::HashSet::new();
+
     if !is_wasm && vcpkg_root().is_some() {
+        // vcpkg path: link psp + protos from cmake build, then vcpkg libs from
+        // the single correct triplet release lib dir. Do NOT recursively walk
+        // vcpkg_installed/ — it contains debug/ and host triplet dirs that would
+        // cause massive duplication and trigger rustc archive size bugs.
         let triplet = vcpkg_triplet();
-        let vcpkg_lib_dir = cmake_build_dir
-            .join("build")
+        let vcpkg_lib_dir = build_dir
             .join("vcpkg_installed")
             .join(triplet)
             .join("lib");
 
+        // Link protos from its build dir
+        let protos_dir = build_dir.join("protos-build");
+        link_archives_flat(&protos_dir, &mut linked)?;
+
+        // Link all vcpkg release libs (non-recursive, single directory)
         if vcpkg_lib_dir.exists() {
             println!(
                 "cargo:warning=Adding vcpkg lib dir: {}",
                 vcpkg_lib_dir.display()
             );
-            println!(
-                "cargo:rustc-link-search=native={}",
-                vcpkg_lib_dir.display()
-            );
-            link_cmake_static_archives(&vcpkg_lib_dir)?;
+            link_archives_flat(&vcpkg_lib_dir, &mut linked)?;
         }
+    } else {
+        // ExternalProject path: recursive walk is fine since there's no
+        // vcpkg_installed directory with duplicate triplets.
+        link_cmake_static_archives(cmake_build_dir, &mut linked)?;
     }
 
     println!("cargo:rerun-if-changed=cpp/perspective");
@@ -243,36 +251,86 @@ fn cmake_link_deps(cmake_build_dir: &Path) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-/// Walk the cmake output path and emit link instructions for all archives.
-/// TODO Can this be faster pls?
-/// TODO update apparently not https://github.com/rust-lang/cmake-rs/issues/149
-fn link_cmake_static_archives(dir: &Path) -> Result<(), std::io::Error> {
-    if dir.is_dir() {
-        for entry in fs::read_dir(dir)? {
+/// Link all static archives in a single directory (non-recursive).
+fn link_archives_flat(dir: &Path, linked: &mut std::collections::HashSet<String>) -> Result<(), std::io::Error> {
+    if !dir.is_dir() {
+        return Ok(());
+    }
+
+    // On Windows with MSVC/Visual Studio generator, release libs may be in a
+    // MinSizeRel/ or Release/ subdirectory. Check for those too.
+    let dirs_to_scan: Vec<PathBuf> = if cfg!(windows) {
+        let mut dirs = vec![dir.to_path_buf()];
+        for sub in &["MinSizeRel", "Release", "RelWithDebInfo"] {
+            let p = dir.join(sub);
+            if p.is_dir() {
+                dirs.push(p);
+            }
+        }
+        dirs
+    } else {
+        vec![dir.to_path_buf()]
+    };
+
+    for scan_dir in &dirs_to_scan {
+        println!("cargo:rustc-link-search=native={}", scan_dir.display());
+        for entry in fs::read_dir(scan_dir)? {
             let path = entry?.path();
             if path.is_dir() {
-                link_cmake_static_archives(&path)?;
-            } else {
-                let ext = path.extension().as_ref().map(|x| x.to_string_lossy());
-                let stem = path.file_stem().as_ref().map(|x| x.to_string_lossy());
-                let is_archive = (cfg!(windows)
-                    && ext.as_deref() == Some("lib")
-                    && stem.as_deref() != Some("perspective"))
-                    || (!cfg!(windows) && ext.as_deref() == Some("a"));
-                if is_archive {
-                    let a = if cfg!(windows) {
-                        stem.unwrap().to_string()
-                    } else {
-                        stem.expect("bad")[3..].to_string()
-                    };
-
-                    // println!("cargo:warning=static link {} {}", a, dir.display());
-                    println!("cargo:rustc-link-search=native={}", dir.display());
-                    println!("cargo:rustc-link-lib=static={a}");
+                continue;
+            }
+            if let Some(name) = archive_lib_name(&path) {
+                if linked.insert(name.clone()) {
+                    println!("cargo:rustc-link-lib=static={name}");
                 }
             }
         }
     }
-
     Ok(())
+}
+
+/// Walk the cmake output path and emit link instructions for all archives.
+/// Used only for the ExternalProject (non-vcpkg) path.
+fn link_cmake_static_archives(dir: &Path, linked: &mut std::collections::HashSet<String>) -> Result<(), std::io::Error> {
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            // Skip vcpkg_installed if it somehow exists in this path
+            let name = path.file_name().map(|n| n.to_string_lossy());
+            if name.as_deref() == Some("vcpkg_installed") {
+                continue;
+            }
+            link_cmake_static_archives(&path, linked)?;
+        } else if let Some(name) = archive_lib_name(&path) {
+            if linked.insert(name.clone()) {
+                println!("cargo:rustc-link-search=native={}", dir.display());
+                println!("cargo:rustc-link-lib=static={name}");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Extract the library name from an archive file path, or None if not an archive.
+fn archive_lib_name(path: &Path) -> Option<String> {
+    let ext = path.extension()?.to_string_lossy();
+    let stem = path.file_stem()?.to_string_lossy();
+
+    let is_archive = (cfg!(windows) && ext == "lib" && stem != "perspective")
+        || (!cfg!(windows) && ext == "a");
+
+    if !is_archive {
+        return None;
+    }
+
+    let name = if cfg!(windows) {
+        stem.to_string()
+    } else {
+        // Strip "lib" prefix: libfoo.a -> foo
+        stem.strip_prefix("lib").unwrap_or(&stem).to_string()
+    };
+    Some(name)
 }
