@@ -22,10 +22,5 @@
         "tsl-ordered-map",
         "exprtk"
     ],
-    "overrides": [
-        {
-            "name": "arrow",
-            "version": "18.1.0"
-        }
-    ]
+    "overrides": []
 }
