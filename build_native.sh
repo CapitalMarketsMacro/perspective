@@ -97,11 +97,30 @@ cp -r rust/perspective "$DIST_DIR/rust/perspective"
 cp -r rust/perspective-client "$DIST_DIR/rust/perspective-client"
 cp -r rust/perspective-server "$DIST_DIR/rust/perspective-server"
 
-# Copy pre-built C++ artifacts so downstream builds skip CMake
-for d in rust/target/release/build/perspective-server-*/out; do
+# Copy only the needed pre-built .a/.lib files (not entire build tree)
+for d in rust/target/release/build/perspective-server-*/out/build; do
     if [ -d "$d" ]; then
         echo "[INFO] Caching C++ build artifacts from $d"
-        cp -r "$d"/* "$DIST_DIR/cpp_cache/"
+        mkdir -p "$DIST_DIR/cpp_cache/build"
+
+        # psp static lib
+        find "$d" -maxdepth 1 -name "libpsp.a" -exec cp {} "$DIST_DIR/cpp_cache/build/" \;
+
+        # protos static lib
+        if [ -d "$d/protos-build" ]; then
+            mkdir -p "$DIST_DIR/cpp_cache/build/protos-build"
+            find "$d/protos-build" -maxdepth 1 -name "libprotos.a" -exec cp {} "$DIST_DIR/cpp_cache/build/protos-build/" \;
+        fi
+
+        # vcpkg release libs only (single triplet, no debug)
+        triplet="x64-linux-static"
+        vcpkg_lib="$d/vcpkg_installed/$triplet/lib"
+        if [ -d "$vcpkg_lib" ]; then
+            mkdir -p "$DIST_DIR/cpp_cache/build/vcpkg_installed/$triplet/lib"
+            cp "$vcpkg_lib"/*.a "$DIST_DIR/cpp_cache/build/vcpkg_installed/$triplet/lib/"
+            echo "  [VCPKG] Copied release libs"
+        fi
+
         break
     fi
 done

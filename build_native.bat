@@ -124,11 +124,29 @@ xcopy /s /e /q /i "rust\perspective" "%DIST_DIR%\rust\perspective" >nul
 xcopy /s /e /q /i "rust\perspective-client" "%DIST_DIR%\rust\perspective-client" >nul
 xcopy /s /e /q /i "rust\perspective-server" "%DIST_DIR%\rust\perspective-server" >nul
 
-:: ---- Cache pre-built C++ artifacts ----
+:: ---- Cache only the needed pre-built .lib files (not entire build tree) ----
 for /d %%d in (rust\target\release\build\perspective-server-*) do (
-    if exist "%%d\out" (
-        echo [INFO] Caching C++ build artifacts from %%d\out
-        xcopy /s /e /q /i "%%d\out" "%DIST_DIR%\cpp_cache" >nul
+    if exist "%%d\out\build" (
+        echo [INFO] Caching C++ build artifacts from %%d\out\build
+        mkdir "%DIST_DIR%\cpp_cache\build" 2>nul
+        :: psp.lib (may be in MinSizeRel/ or Release/)
+        for /r "%%d\out\build" %%f in (psp.lib) do (
+            echo   [LIB] %%f
+            mkdir "%DIST_DIR%\cpp_cache\build\%%~pf" 2>nul
+            copy "%%f" "%DIST_DIR%\cpp_cache\build\%%~pf" >nul 2>nul
+        )
+        :: protos.lib
+        for /r "%%d\out\build\protos-build" %%f in (protos.lib) do (
+            echo   [LIB] %%f
+            mkdir "%DIST_DIR%\cpp_cache\build\protos-build\%%~pf" 2>nul
+            copy "%%f" "%DIST_DIR%\cpp_cache\build\protos-build\%%~pf" >nul 2>nul
+        )
+        :: vcpkg release libs only (single triplet, no debug)
+        if exist "%%d\out\build\vcpkg_installed\x64-windows-static-perspective\lib" (
+            mkdir "%DIST_DIR%\cpp_cache\build\vcpkg_installed\x64-windows-static-perspective\lib" 2>nul
+            copy "%%d\out\build\vcpkg_installed\x64-windows-static-perspective\lib\*.lib" "%DIST_DIR%\cpp_cache\build\vcpkg_installed\x64-windows-static-perspective\lib\" >nul
+            echo   [VCPKG] Copied release libs
+        )
     )
 )
 
