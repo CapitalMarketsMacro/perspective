@@ -15,6 +15,7 @@
 #include <perspective/arrow_csv.h>
 #include <arrow/util/value_parsing.h>
 #include <arrow/io/memory.h>
+#include <arrow/buffer.h>
 #include <arrow/csv/reader.h>
 
 template <class TimePoint>

@@ -15,6 +15,7 @@
 #include <arrow/array/array_binary.h>
 #include <arrow/array/array_nested.h>
 #include <arrow/array/array_primitive.h>
+#include <arrow/buffer.h>
 #include <arrow/type.h>
 #include <arrow/type_fwd.h>
 #include <cstdint>
