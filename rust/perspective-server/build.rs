@@ -14,8 +14,45 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use cmake::Config;
-use protobuf_src::protoc;
 use shlex::Shlex;
+
+/// Find the protoc binary. Checks in order:
+/// 1. PROTOC env var
+/// 2. protobuf-src crate (if bundled-protoc feature enabled)
+/// 3. System PATH
+fn find_protoc() -> PathBuf {
+    // Check PROTOC env var first
+    if let Ok(protoc) = std::env::var("PROTOC") {
+        let p = PathBuf::from(&protoc);
+        if p.exists() {
+            println!("cargo:warning=Using PROTOC from environment: {protoc}");
+            return p;
+        }
+    }
+
+    // Try protobuf-src crate if available
+    #[cfg(feature = "bundled-protoc")]
+    {
+        let p = protobuf_src::protoc();
+        println!("cargo:warning=Using bundled protoc: {}", p.display());
+        return p;
+    }
+
+    // Fall back to system PATH
+    #[allow(unreachable_code)]
+    {
+        if let Ok(p) = which::which("protoc") {
+            println!("cargo:warning=Using system protoc: {}", p.display());
+            return p;
+        }
+        panic!(
+            "protoc not found. Either:\n\
+             - Set PROTOC env var to the protoc binary path\n\
+             - Install protoc (e.g. via vcpkg, chocolatey, or apt)\n\
+             - Enable the 'bundled-protoc' feature to build from source"
+        );
+    }
+}
 
 fn main() -> Result<(), std::io::Error> {
     if std::env::var("DOCS_RS").is_ok() {
@@ -67,11 +104,12 @@ fn cmake_build() -> Result<Option<PathBuf>, std::io::Error> {
     dst.define("ARROW_BUILD_EXAMPLES", "OFF");
     dst.define("RAPIDJSON_BUILD_EXAMPLES", "OFF");
     dst.define("ARROW_CXX_FLAGS_DEBUG", "-Wno-error");
+    let protoc_path = find_protoc();
     dst.define(
         "PSP_PROTOC_PATH",
-        protoc()
+        protoc_path
             .parent()
-            .expect("protoc() returned root path or empty string"),
+            .expect("protoc path returned root path or empty string"),
     );
     dst.define("CMAKE_COLOR_DIAGNOSTICS", "ON");
     dst.define(
