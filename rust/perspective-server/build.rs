@@ -286,6 +286,13 @@ fn cmake_link_deps(cmake_build_dir: &Path) -> Result<(), std::io::Error> {
         link_cmake_static_archives(cmake_build_dir, &mut linked)?;
     }
 
+    // Windows system libraries needed by Arrow and other C++ deps
+    if cfg!(windows) {
+        for lib in &["ole32", "shell32", "advapi32", "bcrypt", "ws2_32", "crypt32", "userenv"] {
+            println!("cargo:rustc-link-lib=dylib={lib}");
+        }
+    }
+
     println!("cargo:rerun-if-changed=cpp/perspective");
     println!("cargo:rerun-if-changed=vcpkg.json");
     Ok(())
