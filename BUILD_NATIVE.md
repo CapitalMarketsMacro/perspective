@@ -1,6 +1,6 @@
-# Building Perspective Native (C++) with vcpkg
+# Building Perspective Native (C++) with Conan
 
-This guide covers building the Perspective C++ engine on **Windows** and **Linux** using [vcpkg](https://github.com/microsoft/vcpkg) for dependency management, and how to use the built library in your own Rust projects.
+This guide covers building the Perspective C++ engine on **Windows** and **Linux** using [Conan](https://conan.io/) for dependency management, and how to use the built library in your own Rust projects.
 
 For the full JavaScript/Python/WASM development workflow, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
@@ -11,7 +11,7 @@ For the full JavaScript/Python/WASM development workflow, see [DEVELOPMENT.md](D
 - **Rust** (nightly) — installed automatically via `rust-toolchain.toml`
 - **CMake** 3.29.5 or later
 - **Git**
-- **vcpkg** — see installation below
+- **Conan** 2.x — see installation below
 
 ### Windows
 
@@ -21,34 +21,27 @@ For the full JavaScript/Python/WASM development workflow, see [DEVELOPMENT.md](D
 ### Linux
 
 - **GCC 11+** or **Clang 15+**
-- **pkg-config**, **autoconf**, **libtool** (for vcpkg builds)
+- **pkg-config**, **autoconf**, **libtool** (for building dependencies)
 
 ```bash
 # Ubuntu/Debian
 sudo apt install build-essential pkg-config autoconf libtool cmake git curl zip unzip tar
 ```
 
-## Installing vcpkg
-
-If you don't already have vcpkg installed:
+## Installing Conan
 
 ```bash
-git clone https://github.com/microsoft/vcpkg.git
-cd vcpkg
-./bootstrap-vcpkg.sh    # Linux/macOS
-# or
-.\bootstrap-vcpkg.bat   # Windows
+pip install conan
 ```
 
-Set the environment variable:
+On first use, Conan will auto-detect your compiler and create a default profile. You can verify with:
 
 ```bash
-# Linux/macOS — add to ~/.bashrc or ~/.zshrc
-export VCPKG_ROOT=/path/to/vcpkg
-
-# Windows — set via System Properties or:
-setx VCPKG_ROOT "E:\VCPKG\vcpkg"
+conan profile detect
+conan profile show
 ```
+
+The project includes platform-specific profiles in `rust/perspective-server/conan/profiles/` that configure static linking. The build system selects the appropriate profile automatically.
 
 ## Build and Deploy
 
@@ -66,12 +59,12 @@ chmod +x build_native.sh
 ```
 
 The scripts will:
-1. Check prerequisites (Rust, CMake, vcpkg, C++ compiler)
+1. Check prerequisites (Rust, CMake, Conan, C++ compiler)
 2. Generate protobuf bindings if needed (first-time only)
 3. Build the C++ engine and all Rust crates in **release** mode
 4. Deploy everything to `dist/perspective/`
 
-The first build takes 10-20 minutes (vcpkg compiles Arrow, Protobuf, Boost, etc.). Subsequent builds reuse the vcpkg cache.
+The first build takes 10-20 minutes (Conan compiles Arrow, Protobuf, Boost, etc.). Subsequent builds reuse the Conan package cache.
 
 ## Deployment Output
 
@@ -163,15 +156,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 cargo build --release
 ```
 
-This compiles only your Rust code. The C++ engine links from the pre-built cache — no CMake, no vcpkg, no C++ compiler needed.
+This compiles only your Rust code. The C++ engine links from the pre-built cache — no CMake, no Conan, no C++ compiler needed.
 
 ## Will C++ Dependencies Rebuild?
 
 | Scenario | C++ Rebuilds? |
 |----------|--------------|
 | `PSP_CPP_BUILD_DIR` set to `cpp_cache/` | **No** — reuses cached `.lib`/`.a` files |
-| `PSP_CPP_BUILD_DIR` not set, `VCPKG_ROOT` set | **Yes** — CMake runs but vcpkg caches packages |
-| Neither set | **Yes** — full ExternalProject download + build |
+| `PSP_CPP_BUILD_DIR` not set, Conan installed | **Yes** — CMake runs but Conan caches packages |
+| Conan not installed | **Yes** — full ExternalProject download + build |
 | `PSP_DISABLE_CPP=1` | **Skipped entirely** (link will fail unless libs exist) |
 
 **Recommendation:** Always set `PSP_CPP_BUILD_DIR` when using the deployed package. The `env.bat`/`env.sh` scripts do this for you.
@@ -221,9 +214,9 @@ let config = ViewConfigUpdate {
 let view = table.view(Some(config)).await?;
 ```
 
-## Build Without vcpkg (Fallback)
+## Build Without Conan (Fallback)
 
-If `VCPKG_ROOT` is not set, the build downloads dependencies via CMake `ExternalProject_Add`. This requires internet access during the build but no vcpkg installation.
+If Conan is not installed, the build downloads dependencies via CMake `ExternalProject_Add`. This requires internet access during the build but no Conan installation.
 
 ## Troubleshooting
 
@@ -234,4 +227,4 @@ Ensure the path points to the `cpp_cache/` directory that contains a `build/` su
 Install "Desktop development with C++" workload via Visual Studio Installer.
 
 ### Slow first build
-The first build downloads and compiles ~90 vcpkg packages. Configure [vcpkg binary caching](https://learn.microsoft.com/en-us/vcpkg/users/binarycaching) for faster CI builds.
+The first build downloads and compiles all C++ dependencies. Conan caches built packages in `~/.conan2/` so subsequent builds (even in different projects) reuse them.

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 echo "============================================"
-echo " Perspective Native Build (Linux + vcpkg)"
+echo " Perspective Native Build (Linux + Conan)"
 echo "============================================"
 echo
 
@@ -35,21 +35,15 @@ else
     exit 1
 fi
 
-# Check for vcpkg
-USE_VCPKG=0
-if [ -z "${VCPKG_ROOT:-}" ]; then
-    echo "[WARN] VCPKG_ROOT is not set."
+# Check for Conan
+USE_CONAN=0
+if ! command -v conan &>/dev/null; then
+    echo "[WARN] conan not found in PATH."
     echo "       The build will fall back to downloading dependencies via ExternalProject."
-    echo "       To use vcpkg, set VCPKG_ROOT to your vcpkg installation directory."
+    echo "       To use Conan, install it: pip install conan"
 else
-    if [ ! -f "$VCPKG_ROOT/vcpkg" ]; then
-        echo "[WARN] vcpkg binary not found at $VCPKG_ROOT"
-        echo "       Run ./bootstrap-vcpkg.sh in your vcpkg directory first."
-        echo "       Falling back to ExternalProject."
-    else
-        echo "[OK] vcpkg found at $VCPKG_ROOT"
-        USE_VCPKG=1
-    fi
+    echo "[OK] $(conan --version)"
+    USE_CONAN=1
 fi
 
 echo
@@ -75,8 +69,8 @@ echo
 echo "--- Phase 2: Building C++ engine + Rust crates (release) ---"
 echo
 
-if [ "$USE_VCPKG" = "1" ]; then
-    echo "[INFO] Using vcpkg at $VCPKG_ROOT"
+if [ "$USE_CONAN" = "1" ]; then
+    echo "[INFO] Conan is available and will be used for C++ dependencies"
 fi
 
 cargo build --release -p perspective-client --features omit_metadata
@@ -112,13 +106,21 @@ for d in rust/target/release/build/perspective-server-*/out/build; do
             find "$d/protos-build" -maxdepth 1 -name "libprotos.a" -exec cp {} "$DIST_DIR/cpp_cache/build/protos-build/" \;
         fi
 
-        # vcpkg release libs only (single triplet, no debug)
-        triplet="x64-linux-static"
-        vcpkg_lib="$d/vcpkg_installed/$triplet/lib"
-        if [ -d "$vcpkg_lib" ]; then
-            mkdir -p "$DIST_DIR/cpp_cache/build/vcpkg_installed/$triplet/lib"
-            cp "$vcpkg_lib"/*.a "$DIST_DIR/cpp_cache/build/vcpkg_installed/$triplet/lib/"
-            echo "  [VCPKG] Copied release libs"
+        # Conan-installed libs are in the Conan cache and linked via CMake.
+        # For the dist cache, we copy the static archives that CMake linked.
+        conan_output="$d/../conan_output"
+        if [ -d "$conan_output" ]; then
+            # Parse lib dirs from Conan-generated cmake files and copy archives
+            for cmake_file in "$conan_output"/*.cmake; do
+                [ -f "$cmake_file" ] || continue
+                grep -oP '(?<=")[^"]+/lib(?=")' "$cmake_file" 2>/dev/null | sort -u | while read -r libdir; do
+                    if [ -d "$libdir" ]; then
+                        mkdir -p "$DIST_DIR/cpp_cache/conan_libs"
+                        cp "$libdir"/*.a "$DIST_DIR/cpp_cache/conan_libs/" 2>/dev/null || true
+                    fi
+                done
+            done
+            echo "  [CONAN] Copied release libs"
         fi
 
         break
@@ -199,10 +201,8 @@ cat > "$DIST_DIR/env.sh" << ENV_EOF
 # Usage: source env.sh
 
 export PSP_CPP_BUILD_DIR="$DIST_DIR/cpp_cache"
-export VCPKG_ROOT="${VCPKG_ROOT:-}"
 echo "[OK] Perspective environment configured."
 echo "     PSP_CPP_BUILD_DIR=\$PSP_CPP_BUILD_DIR"
-echo "     VCPKG_ROOT=\$VCPKG_ROOT"
 ENV_EOF
 chmod +x "$DIST_DIR/env.sh"
 

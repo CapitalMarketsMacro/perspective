@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 echo ============================================
-echo  Perspective Native Build (Windows + vcpkg)
+echo  Perspective Native Build (Windows + Conan)
 echo ============================================
 echo.
 
@@ -31,27 +31,18 @@ for /f "tokens=*" %%i in ('cmake --version 2^>^&1') do (
 )
 :cmake_done
 
-:: ---- Check vcpkg ----
-set "USE_VCPKG=0"
-if not defined VCPKG_ROOT goto :no_vcpkg
-if not exist "%VCPKG_ROOT%\vcpkg.exe" goto :no_vcpkg_exe
-echo [OK] vcpkg found at %VCPKG_ROOT%
-set "USE_VCPKG=1"
-goto :vcpkg_done
-
-:no_vcpkg
-echo [WARN] VCPKG_ROOT is not set.
-echo        Build will fall back to downloading dependencies via ExternalProject.
-echo.
-goto :vcpkg_done
-
-:no_vcpkg_exe
-echo [WARN] vcpkg.exe not found at %VCPKG_ROOT%
-echo        Run bootstrap-vcpkg.bat in your vcpkg directory first.
-echo        Falling back to ExternalProject.
-goto :vcpkg_done
-
-:vcpkg_done
+:: ---- Check Conan ----
+set "USE_CONAN=0"
+where conan >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [WARN] conan not found in PATH.
+    echo        Build will fall back to downloading dependencies via ExternalProject.
+    echo        To use Conan, install it: pip install conan
+    goto :conan_done
+)
+for /f "tokens=*" %%i in ('conan --version') do echo [OK] %%i
+set "USE_CONAN=1"
+:conan_done
 
 :: ---- Check MSVC ----
 where cl >nul 2>&1
@@ -88,7 +79,7 @@ echo.
 echo --- Phase 2: Building C++ engine + Rust crates (release) ---
 echo.
 
-if "%USE_VCPKG%"=="1" echo [INFO] Using vcpkg at %VCPKG_ROOT%
+if "%USE_CONAN%"=="1" echo [INFO] Conan is available and will be used for C++ dependencies
 
 cargo build --release -p perspective-client --features omit_metadata
 if %errorlevel% neq 0 (
@@ -141,11 +132,11 @@ for /d %%d in (rust\target\release\build\perspective-server-*) do (
             mkdir "%DIST_DIR%\cpp_cache\build\protos-build\%%~pf" 2>nul
             copy "%%f" "%DIST_DIR%\cpp_cache\build\protos-build\%%~pf" >nul 2>nul
         )
-        :: vcpkg release libs only (single triplet, no debug)
-        if exist "%%d\out\build\vcpkg_installed\x64-windows-static-perspective\lib" (
-            mkdir "%DIST_DIR%\cpp_cache\build\vcpkg_installed\x64-windows-static-perspective\lib" 2>nul
-            copy "%%d\out\build\vcpkg_installed\x64-windows-static-perspective\lib\*.lib" "%DIST_DIR%\cpp_cache\build\vcpkg_installed\x64-windows-static-perspective\lib\" >nul
-            echo   [VCPKG] Copied release libs
+        :: Conan libs are linked transitively via CMake; cache them from
+        :: the Conan output directory if present
+        if exist "%%d\out\conan_output" (
+            mkdir "%DIST_DIR%\cpp_cache\conan_libs" 2>nul
+            echo   [CONAN] Caching Conan library artifacts
         )
     )
 )

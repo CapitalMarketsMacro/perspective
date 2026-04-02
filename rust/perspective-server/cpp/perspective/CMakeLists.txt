@@ -31,12 +31,12 @@ endif()
 set(CMAKE_MODULE_PATH "${PSP_CMAKE_MODULE_PATH}/modules" ${CMAKE_MODULE_PATH})
 set(MSVC_RUNTIME_LIBRARY MultiThreaded)
 
-# Detect vcpkg toolchain
-if(DEFINED CMAKE_TOOLCHAIN_FILE AND CMAKE_TOOLCHAIN_FILE MATCHES "vcpkg")
-    set(PSP_USE_VCPKG TRUE)
-    message(STATUS "vcpkg toolchain detected: ${CMAKE_TOOLCHAIN_FILE}")
+# Detect Conan toolchain
+if(DEFINED CMAKE_TOOLCHAIN_FILE AND CMAKE_TOOLCHAIN_FILE MATCHES "conan_toolchain")
+    set(PSP_USE_CONAN TRUE)
+    message(STATUS "Conan toolchain detected: ${CMAKE_TOOLCHAIN_FILE}")
 else()
-    set(PSP_USE_VCPKG FALSE)
+    set(PSP_USE_CONAN FALSE)
 endif()
 
 option(PSP_WASM64 "Enable WASM Memory64 support" OFF)
@@ -374,9 +374,9 @@ endif()
 # ############################
 # DEPENDENCY RESOLUTION      #
 # ############################
-if(PSP_USE_VCPKG AND NOT PSP_WASM_BUILD)
-    # === vcpkg path (native builds) ===
-    psp_build_message("${Cyan}Using vcpkg for dependency resolution${ColorReset}")
+if(PSP_USE_CONAN AND NOT PSP_WASM_BUILD)
+    # === Conan path (native builds) ===
+    psp_build_message("${Cyan}Using Conan for dependency resolution${ColorReset}")
 
     find_package(Arrow CONFIG REQUIRED)
     find_package(re2 CONFIG REQUIRED)
@@ -385,22 +385,48 @@ if(PSP_USE_VCPKG AND NOT PSP_WASM_BUILD)
     find_package(date CONFIG REQUIRED)
     find_package(tsl-hopscotch-map CONFIG REQUIRED)
     find_package(tsl-ordered-map CONFIG REQUIRED)
-    # exprtk is header-only with no CMake config in vcpkg;
-    # vcpkg places it in the standard include path automatically.
+    find_package(exprtk CONFIG REQUIRED)
+    find_package(absl CONFIG REQUIRED)
 
-    # vcpkg targets propagate include dirs via target properties,
-    # so all_deps_INCLUDE_DIRS is not needed for the vcpkg path.
-    set(all_deps_INCLUDE_DIRS "")
+    # Conan's CMakeDeps generator uses config-specific generator expressions
+    # for include dirs which don't always resolve with MSVC multi-config builds.
+    # Load the data files directly and populate all_deps_INCLUDE_DIRS.
+    cmake_path(GET CMAKE_TOOLCHAIN_FILE PARENT_PATH _conan_gen)
+    string(REGEX REPLACE "^//\\?/" "" _conan_gen "${_conan_gen}")
+    file(GLOB _conan_data_files "${_conan_gen}/*-data.cmake")
+    foreach(_f ${_conan_data_files})
+        include(${_f})
+    endforeach()
 
-    # Canonical link target names (vcpkg)
-    set(PSP_ARROW_TARGET Arrow::arrow_static)
+    set(all_deps_INCLUDE_DIRS
+        ${arrow_INCLUDE_DIRS_RELEASE}
+        ${protobuf_INCLUDE_DIRS_RELEASE}
+        ${re2_INCLUDE_DIRS_RELEASE}
+        ${rapidjson_INCLUDE_DIRS_RELEASE}
+        ${boost_INCLUDE_DIRS_RELEASE}
+        ${date_INCLUDE_DIRS_RELEASE}
+        ${abseil_INCLUDE_DIRS_RELEASE}
+        ${exprtk_INCLUDE_DIRS_RELEASE}
+    )
+
+    # Static linking compile definitions from Conan data files.
+    # Without these, Arrow/protobuf headers use __declspec(dllimport)
+    # and the linker looks for __imp_ symbols that don't exist in static libs.
+    set(PSP_CONAN_DEFINITIONS
+        ${arrow_COMPILE_DEFINITIONS_RELEASE}
+        ${boost_COMPILE_DEFINITIONS_RELEASE}
+        ${libcurl_COMPILE_DEFINITIONS_RELEASE}
+    )
+
+    # Canonical link target names (Conan CMakeDeps)
+    set(PSP_ARROW_TARGET arrow::arrow)
     set(PSP_RE2_TARGET re2::re2)
 
-    # Protobuf setup (vcpkg path)
+    # Protobuf setup (Conan path)
     set(protobuf_BUILD_TESTS OFF FORCE)
     add_subdirectory(${PSP_CMAKE_MODULE_PATH}/../cpp/protos "${CMAKE_BINARY_DIR}/protos-build")
 else()
-    # === ExternalProject path (WASM/Emscripten builds or no vcpkg) ===
+    # === ExternalProject path (WASM/Emscripten builds or no Conan) ===
     psp_build_message("${Cyan}Using ExternalProject for dependency resolution${ColorReset}")
 
     set(all_deps_INCLUDE_DIRS "")
@@ -698,17 +724,13 @@ elseif(PSP_CPP_BUILD OR PSP_PYTHON_BUILD)
             set(CMAKE_EXE_LINKER_FLAGS "${PSP_WASM_LINKER_FLAGS} --pre-js \"${PSP_CPP_SRC}/env.js\" ")
             add_library(psp STATIC ${PYTHON_SOURCE_FILES})
             target_include_directories(psp PRIVATE ${psp_INCLUDE_DIRS})
-            target_include_directories(psp SYSTEM PRIVATE ${all_deps_INCLUDE_DIRS})
+            target_include_directories(psp PRIVATE ${all_deps_INCLUDE_DIRS})
             target_compile_definitions(psp PRIVATE PSP_ENABLE_PYTHON=1 PSP_ENABLE_WASM=1)
         else()
             # Cpython
             add_library(psp STATIC ${PYTHON_SOURCE_FILES})
             target_include_directories(psp PRIVATE ${psp_INCLUDE_DIRS})
-            if(PSP_USE_VCPKG)
-                # vcpkg: include dirs come from linked targets
-            else()
-                target_include_directories(psp SYSTEM PRIVATE ${all_deps_INCLUDE_DIRS})
-            endif()
+            target_include_directories(psp PRIVATE ${all_deps_INCLUDE_DIRS})
             target_compile_definitions(psp PRIVATE PSP_ENABLE_PYTHON=1 PSP_PARALLEL_FOR=1)
         endif()
 
@@ -722,16 +744,17 @@ elseif(PSP_CPP_BUILD OR PSP_PYTHON_BUILD)
             target_compile_options(psp PRIVATE -fvisibility=hidden)
         endif()
 
-        if(PSP_USE_VCPKG AND NOT PSP_WASM_BUILD)
+        if(PSP_USE_CONAN AND NOT PSP_WASM_BUILD)
             target_link_libraries(psp PRIVATE
                 ${PSP_ARROW_TARGET}
                 ${PSP_RE2_TARGET}
                 protos
-                RapidJSON
-                Boost::headers
+                rapidjson
+                boost::boost
                 date::date
                 tsl::hopscotch_map
                 tsl::ordered_map
+                exprtk::exprtk
             )
         else()
             target_link_libraries(psp PRIVATE ${PSP_ARROW_TARGET} ${PSP_RE2_TARGET} protos)
@@ -739,23 +762,20 @@ elseif(PSP_CPP_BUILD OR PSP_PYTHON_BUILD)
     else()
         add_library(psp STATIC ${WASM_SOURCE_FILES})
         target_include_directories(psp PRIVATE ${psp_INCLUDE_DIRS})
-        if(PSP_USE_VCPKG)
-            # vcpkg: include dirs come from linked targets
-        else()
-            target_include_directories(psp SYSTEM PRIVATE ${all_deps_INCLUDE_DIRS})
-        endif()
+        target_include_directories(psp PRIVATE ${all_deps_INCLUDE_DIRS})
         target_compile_options(psp PRIVATE -fvisibility=hidden)
 
-        if(PSP_USE_VCPKG)
+        if(PSP_USE_CONAN)
             target_link_libraries(psp PRIVATE
                 ${PSP_ARROW_TARGET}
                 ${PSP_RE2_TARGET}
                 protos
-                RapidJSON
-                Boost::headers
+                rapidjson
+                boost::boost
                 date::date
                 tsl::hopscotch_map
                 tsl::ordered_map
+                exprtk::exprtk
             )
         else()
             target_link_libraries(psp PRIVATE ${PSP_ARROW_TARGET} ${PSP_RE2_TARGET} protos)
@@ -772,6 +792,11 @@ elseif(PSP_CPP_BUILD OR PSP_PYTHON_BUILD)
         target_compile_definitions(psp PRIVATE PERSPECTIVE_EXPORTS=1)
         target_compile_definitions(psp PRIVATE WIN32=1)
         target_compile_definitions(psp PRIVATE _WIN32=1)
+    endif()
+
+    # Apply Conan static linking defines (e.g. ARROW_STATIC, BOOST_ALL_NO_LIB)
+    if(PSP_USE_CONAN AND DEFINED PSP_CONAN_DEFINITIONS)
+        target_compile_definitions(psp PRIVATE ${PSP_CONAN_DEFINITIONS})
     endif()
 endif()
 

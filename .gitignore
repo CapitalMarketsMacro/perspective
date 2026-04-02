@@ -57,7 +57,7 @@ rust/perspective-viewer/src/ts/ts-rs
 rust/perspective/src/ts/ts-rs
 rust/target*
 Vagrantfile
-vcpkg
+conan_output/
 venv/
 rust/perspective-python/perspective_python-*.data
 .pytest-cache/
