@@ -23,9 +23,10 @@ class PerspectiveServerConan(ConanFile):
         self.requires("tsl-ordered-map/1.1.0")
         self.requires("exprtk/0.0.2")
 
-        # Force abseil version that satisfies both protobuf (range >=20230802.1)
-        # and re2/20240702 (hard-pins 20240116.1).
-        self.requires("abseil/20240116.1", force=True)
+        # Let abseil resolve to the latest version in range.
+        # The pre-built re2/protobuf Conan binaries use abseil/20250127.0
+        # even though re2's recipe pins 20240116.1 — override to match.
+        self.requires("abseil/20250127.0", force=True)
 
     def configure(self):
         # We only need specific Boost modules but Conan's boost recipe
@@ -73,6 +74,7 @@ class PerspectiveServerConan(ConanFile):
         self.options["arrow"].with_bz2 = False
         self.options["arrow"].with_lz4 = False
         self.options["arrow"].with_snappy = False
+        self.options["arrow"].with_zlib = False
         self.options["arrow"].with_zstd = False
         self.options["arrow"].with_thrift = False
 

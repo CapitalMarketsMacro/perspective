@@ -300,8 +300,10 @@ fn cmake_build() -> Result<Option<PathBuf>, std::io::Error> {
         std::env::var("DEP_PERSPECTIVE_CLIENT_PROTO_PATH").unwrap(),
     );
 
-    // Prevent VCPKG_ROOT from interfering — we use Conan now
+    // Prevent vcpkg from interfering — we use Conan now.
+    // Blank VCPKG_ROOT to prevent vcpkg toolchain loading.
     dst.env("VCPKG_ROOT", "");
+    dst.define("VCPKG_MANIFEST_MODE", "OFF");
 
     if let Some(ref conan_dir) = conan_output {
         // Conan 2.x with cmake_layout() puts generators in build/generators/
@@ -469,6 +471,7 @@ fn cmake_link_deps(cmake_build_dir: &Path) -> Result<(), std::io::Error> {
         for lib in &["ole32", "shell32", "advapi32", "bcrypt", "ws2_32", "crypt32", "userenv"] {
             println!("cargo:rustc-link-lib=dylib={lib}");
         }
+
     }
 
     println!("cargo:rerun-if-changed=cpp/perspective");

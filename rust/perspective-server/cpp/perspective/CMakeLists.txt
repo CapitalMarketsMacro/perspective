@@ -35,6 +35,16 @@ set(MSVC_RUNTIME_LIBRARY MultiThreaded)
 if(DEFINED CMAKE_TOOLCHAIN_FILE AND CMAKE_TOOLCHAIN_FILE MATCHES "conan_toolchain")
     set(PSP_USE_CONAN TRUE)
     message(STATUS "Conan toolchain detected: ${CMAKE_TOOLCHAIN_FILE}")
+
+    # Disable vcpkg MSBuild user-wide integration (from vcpkg integrate install).
+    # It injects vcpkg include/lib paths into ALL MSBuild projects, conflicting
+    # with Conan packages (e.g. different abseil/protobuf versions).
+    set(VCPKG_MANIFEST_MODE OFF CACHE BOOL "" FORCE)
+    set(CMAKE_VS_GLOBALS
+        "VcpkgEnabled=false"
+        "VcpkgEnableManifest=false"
+        "VCPkgLocalAppDataDisabled=true"
+    )
 else()
     set(PSP_USE_CONAN FALSE)
 endif()
@@ -398,6 +408,8 @@ if(PSP_USE_CONAN AND NOT PSP_WASM_BUILD)
         include(${_f})
     endforeach()
 
+    # Collect ALL Conan package include dirs.
+    # Variable names come from the Conan data cmake files.
     set(all_deps_INCLUDE_DIRS
         ${arrow_INCLUDE_DIRS_RELEASE}
         ${protobuf_INCLUDE_DIRS_RELEASE}
@@ -407,6 +419,12 @@ if(PSP_USE_CONAN AND NOT PSP_WASM_BUILD)
         ${date_INCLUDE_DIRS_RELEASE}
         ${abseil_INCLUDE_DIRS_RELEASE}
         ${exprtk_INCLUDE_DIRS_RELEASE}
+        ${tsl-hopscotch-map_INCLUDE_DIRS_RELEASE}
+        ${tsl-ordered-map_INCLUDE_DIRS_RELEASE}
+        ${xsimd_INCLUDE_DIRS_RELEASE}
+        ${zlib_INCLUDE_DIRS_RELEASE}
+        ${libcurl_INCLUDE_DIRS_RELEASE}
+        ${openssl_INCLUDE_DIRS_RELEASE}
     )
 
     # Static linking compile definitions from Conan data files.
