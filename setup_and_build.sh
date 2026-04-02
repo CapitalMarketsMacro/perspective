@@ -199,22 +199,28 @@ if command -v conan &>/dev/null; then
     ok "Conan already installed: $CONAN_VER"
     CONAN_INSTALLED=1
 else
-    info "Conan not found — attempting to install via pip..."
-    if [[ -z "$PIP_CMD" ]]; then
-        warn "pip not available, cannot auto-install Conan."
-        warn "Install manually: pip install conan"
-        warn "Build will fall back to ExternalProject (slower, downloads sources)."
+    info "Conan not found - attempting to install..."
+    if command -v pipx &>/dev/null; then
+        # Modern Debian/Ubuntu: use pipx to avoid externally-managed-environment error
+        info "Using pipx to install Conan..."
+        pipx install conan
+    elif [[ -n "$PIP_CMD" ]]; then
+        # Try pip install --user first, fall back to pip install (venv)
+        $PIP_CMD install --user conan 2>/dev/null || $PIP_CMD install conan 2>/dev/null
+    fi
+
+    # Refresh PATH for newly installed conan
+    export PATH="$HOME/.local/bin:$HOME/.local/pipx/venvs/conan/bin:$PATH"
+    if command -v conan &>/dev/null; then
+        ok "Conan installed: $(conan --version)"
+        CONAN_INSTALLED=1
     else
-        $PIP_CMD install --user conan
-        # Refresh PATH for newly installed conan
-        export PATH="$HOME/.local/bin:$PATH"
-        if command -v conan &>/dev/null; then
-            ok "Conan installed: $(conan --version)"
-            CONAN_INSTALLED=1
-        else
-            warn "Conan installed but not in PATH. Add ~/.local/bin to your PATH."
-            warn "Build will fall back to ExternalProject."
-        fi
+        warn "Could not auto-install Conan."
+        warn "Install manually:"
+        warn "  pipx install conan        (Debian/Ubuntu)"
+        warn "  pip install conan         (other systems)"
+        warn "  brew install conan        (macOS)"
+        warn "Build will fall back to ExternalProject (slower, downloads sources)."
     fi
 fi
 
