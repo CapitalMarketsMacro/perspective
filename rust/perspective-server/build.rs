@@ -216,15 +216,17 @@ fn conan_install(manifest_dir: &Path) -> Option<PathBuf> {
         .arg("--build=missing");
 
     if profile_path.exists() {
-        // --profile:host for the target libraries, --profile:build for build tools (protoc etc.)
         cmd.arg("--profile:host").arg(&profile_path);
-        cmd.arg("--profile:build").arg(&profile_path);
     } else {
         println!(
             "cargo:warning=Conan profile {} not found, using default profile",
             profile_path.display()
         );
     }
+
+    // Ensure build tools also use C++17, but keep the default build profile
+    // (don't override compiler.runtime etc. which may not have pre-built binaries)
+    cmd.arg("-s:b").arg("compiler.cppstd=17");
 
     let status = cmd.status();
     match status {

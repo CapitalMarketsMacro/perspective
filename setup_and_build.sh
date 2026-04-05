@@ -274,7 +274,7 @@ if [[ "$CONAN_INSTALLED" -eq 1 ]]; then
     )
 
     if [[ -f "$PROFILE_FILE" ]]; then
-        CONAN_ARGS+=(--profile:host "$PROFILE_FILE" --profile:build "$PROFILE_FILE")
+        CONAN_ARGS+=(--profile:host "$PROFILE_FILE" -s:b compiler.cppstd=17)
     fi
 
     if conan "${CONAN_ARGS[@]}"; then
