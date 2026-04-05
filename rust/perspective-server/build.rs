@@ -216,7 +216,9 @@ fn conan_install(manifest_dir: &Path) -> Option<PathBuf> {
         .arg("--build=missing");
 
     if profile_path.exists() {
-        cmd.arg("--profile").arg(&profile_path);
+        // --profile:host for the target libraries, --profile:build for build tools (protoc etc.)
+        cmd.arg("--profile:host").arg(&profile_path);
+        cmd.arg("--profile:build").arg(&profile_path);
     } else {
         println!(
             "cargo:warning=Conan profile {} not found, using default profile",

@@ -253,7 +253,7 @@ if not exist "%CONAN_OUTPUT%" mkdir "%CONAN_OUTPUT%"
 
 if "!PROFILE_FILE!"=="" goto :conan_install_no_profile
 
-conan install "%CONAN_DIR%" --output-folder "%CONAN_OUTPUT%" --build=missing --profile "%PROFILE_FILE%"
+conan install "%CONAN_DIR%" --output-folder "%CONAN_OUTPUT%" --build=missing --profile:host "%PROFILE_FILE%" --profile:build "%PROFILE_FILE%"
 goto :conan_install_check
 
 :conan_install_no_profile
