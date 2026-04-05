@@ -224,9 +224,6 @@ fn conan_install(manifest_dir: &Path) -> Option<PathBuf> {
         );
     }
 
-    // Ensure build tools also use C++17, but keep the default build profile
-    // (don't override compiler.runtime etc. which may not have pre-built binaries)
-    cmd.arg("-s:b").arg("compiler.cppstd=17");
 
     let status = cmd.status();
     match status {
