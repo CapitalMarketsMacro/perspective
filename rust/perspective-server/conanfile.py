@@ -29,38 +29,12 @@ class PerspectiveServerConan(ConanFile):
         self.requires("abseil/20250127.0", force=True)
 
     def configure(self):
-        # We only need specific Boost modules but Conan's boost recipe
-        # builds header-only by default which covers algorithm, uuid,
-        # functional, math, multi_index, dynamic_bitset.
-        self.options["boost"].without_atomic = True
-        self.options["boost"].without_chrono = True
-        self.options["boost"].without_container = True
-        self.options["boost"].without_context = True
-        self.options["boost"].without_contract = True
-        self.options["boost"].without_coroutine = True
-        self.options["boost"].without_date_time = True
-        self.options["boost"].without_exception = True
-        self.options["boost"].without_fiber = True
-        self.options["boost"].without_filesystem = True
-        self.options["boost"].without_graph = True
-        self.options["boost"].without_graph_parallel = True
-        self.options["boost"].without_iostreams = True
-        self.options["boost"].without_json = True
-        self.options["boost"].without_locale = True
-        self.options["boost"].without_log = True
-        self.options["boost"].without_mpi = True
-        self.options["boost"].without_nowide = True
-        self.options["boost"].without_program_options = True
-        self.options["boost"].without_python = True
-        self.options["boost"].without_random = True
-        self.options["boost"].without_regex = True
-        self.options["boost"].without_serialization = True
-        self.options["boost"].without_stacktrace = True
-        self.options["boost"].without_test = True
-        self.options["boost"].without_thread = True
-        self.options["boost"].without_timer = True
-        self.options["boost"].without_type_erasure = True
-        self.options["boost"].without_wave = True
+        # We only need header-only Boost modules (algorithm, uuid,
+        # functional, math, multi_index, dynamic_bitset).
+        # header_only mode avoids building any compiled libraries and
+        # sidesteps cross-dependency issues between newer Boost modules
+        # (cobalt, process, etc.) that break selective disabling.
+        self.options["boost"].header_only = True
 
         # Arrow: disable most optional features, enable CSV
         self.options["arrow"].with_csv = True
