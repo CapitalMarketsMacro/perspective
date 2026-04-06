@@ -8,9 +8,6 @@ class PerspectiveServerConan(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
     generators = "CMakeToolchain", "CMakeDeps", "VirtualBuildEnv"
 
-    def build_requirements(self):
-        self.tool_requires("protobuf/<host_version>")
-
     def requirements(self):
         self.requires("arrow/18.1.0")
         self.requires("protobuf/5.27.0")
