@@ -13,7 +13,7 @@ class PerspectiveServerConan(ConanFile):
         self.tool_requires("protobuf/<host_version>")
 
     def requirements(self):
-        self.requires("arrow/18.1.0")
+        self.requires("arrow/[>=18.0.0]")
         self.requires("protobuf/5.27.0")
         self.requires("re2/20240702")
         self.requires("rapidjson/cci.20230929")
